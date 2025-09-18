@@ -1,4 +1,4 @@
-from datetime import datetime
+import datetime
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -85,6 +85,7 @@ def index():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
+    print(data)
     email = data.get('email')
     password = data.get('password')
 
@@ -96,7 +97,7 @@ def login():
     if user is None or not user.check_password(password):
         return jsonify({"msg": "Bad email or password"}), 401
 
-    access_token = create_access_token(identity=user.id)
+    access_token = create_access_token(identity=str(user.id))
     return jsonify(access_token=access_token)
 
 @app.route('/users/<int:user_id>', methods=['GET'])
@@ -125,8 +126,9 @@ def get_user_data(user_id):
 @app.route('/sessions', methods=['POST'])
 @jwt_required()
 def create_session_and_receive_data():
-    current_user_id = get_jwt_identity()
+    current_user_id = int(get_jwt_identity())
     data = request.get_json()
+
 
     if not data:
         return jsonify({"msg": "No data provided"}), 400
@@ -144,7 +146,8 @@ def create_session_and_receive_data():
     if not doctor or not patient:
         return jsonify({"msg": "Doctor or patient not found"}), 404
 
-    if doctor.user_id != current_user_id and patient.user_id != current_user_id:
+    print(current_user_id, patient.user_id)
+    if patient.user_id != current_user_id:
         return jsonify({"msg": "Forbidden: You cannot create a session for others"}), 403
 
     session = Session(
