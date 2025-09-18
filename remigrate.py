@@ -60,19 +60,25 @@ def run_migration_commands():
         print(result.stdout)
         print("---")
 
-        # # 5. Executa o script de semeadura (seeding)
-        # print("Executando: python3 seed.py")
-        # result = subprocess.run(
-        #     ['python3', 'seed.py'],
-        #     check=True,
-        #     text=True,
-        #     capture_output=True
-        # )
-        # print("Saída do comando 'seed.py':")
-        # print(result.stdout)
-        # print("---")
+        # 5. Executa o script de semeadura (seeding)
+        print("Executando: python3 seed.py")
 
-        # print("Processo de migração e semeadura concluído com sucesso!")
+        if os.name == 'nt':  # Se o sistema operacional for Windows
+            seedCommand = ['py', 'seed.py']
+        else:  # Se for 'posix' (Linux, macOS, etc.)
+            seedCommand = ['python3', 'seed.py']
+
+        result = subprocess.run(
+            seedCommand,
+            check=True,
+            text=True,
+            capture_output=True
+        )
+        print("Saída do comando 'seed.py':")
+        print(result.stdout)
+        print("---")
+
+        print("Processo de migração e semeadura concluído com sucesso!")
 
     except subprocess.CalledProcessError as e:
         print(f"Erro durante a execução do comando: {e.cmd}")
