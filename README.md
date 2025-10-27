@@ -48,7 +48,7 @@ Após instalar as dependências, você pode iniciar a aplicação localmente.
 `export FLASK_ENV=development`
 `flask run` 
 
->Obs: Tabém pode rodar no modo debug:  `flask --app app --debug run`
+>Obs: Também pode rodar no modo debug:  `flask --app app --debug run`
 
 Isso iniciará o servidor Flask em modo de desenvolvimento na porta `5000`. Acesse a aplicação via navegador no endereço `http://127.0.0.1:5000`.
 
