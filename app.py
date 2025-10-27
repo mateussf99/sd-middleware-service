@@ -1,190 +1,298 @@
 import datetime
+from typing import Dict, Any, List
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
-from flask_jwt_extended import create_access_token, JWTManager, jwt_required, get_jwt_identity
-from passlib.hash import pbkdf2_sha256
 
 app = Flask(__name__)
 CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-app.config['JWT_SECRET_KEY'] = 'uma-chave-secreta-forte'
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
-jwt = JWTManager(app)
 
-class User(db.Model):
-    __tablename__ = 'user'
+
+class Neighborhood(db.Model):
+    __tablename__ = 'neighborhood'
     id = db.Column(db.Integer, primary_key=True)
-    cpf = db.Column(db.String(45), nullable=False, unique=True)
-    name = db.Column(db.String(45), nullable=False)
-    email = db.Column(db.String(45), nullable=False, unique=True)
-    birthDate = db.Column(db.String(45), nullable=False)
-    gender = db.Column(db.String(1), nullable=False)
-    type = db.Column(db.String(45), nullable=False)  # "patient" ou "doctor"
-    password = db.Column(db.String(256), nullable=False)
-    status = db.Column(db.Boolean, default=True)
+    name = db.Column(db.String(120), unique=True, nullable=False, index=True)
 
-    patient = db.relationship("Patient", uselist=False, back_populates="user")
-    doctor = db.relationship("Doctor", uselist=False, back_populates="user")
-
-    def check_password(self, password):
-        return pbkdf2_sha256.verify(password, self.password)
+    measurements = db.relationship('Measurement', back_populates='neighborhood', cascade='all, delete-orphan')
 
 
-class Patient(db.Model):
-    __tablename__ = 'patient'
+class Measurement(db.Model):
+    __tablename__ = 'measurement'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, index=True)
 
-    user = db.relationship("User", back_populates="patient")
-    sessions = db.relationship("Session", back_populates="patient")
+    clima = db.Column(db.JSON, nullable=True)
+    qualidade_do_ar = db.Column(db.JSON, nullable=True)
+    qualidade_da_agua = db.Column(db.JSON, nullable=True)
+    riscos = db.Column(db.JSON, nullable=True)
 
+    neighborhood_id = db.Column(db.Integer, db.ForeignKey('neighborhood.id'), nullable=False)
+    neighborhood = db.relationship('Neighborhood', back_populates='measurements')
 
-class Doctor(db.Model):
-    __tablename__ = 'doctor'
-    id = db.Column(db.Integer, primary_key=True)
-    clinic = db.Column(db.String(45), nullable=False)
-    speciality = db.Column(db.String(45), nullable=True)
+    __table_args__ = (
+        db.UniqueConstraint('neighborhood_id', 'timestamp', name='uq_neigh_time'),
+    )
 
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-
-    user = db.relationship("User", back_populates="doctor")
-    sessions = db.relationship("Session", back_populates="doctor")
-
-
-class Session(db.Model):
-    __tablename__ = 'session'
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, nullable=False)
-    vital_signs_avg = db.Column(db.JSON, nullable=True)
-
-    doctor_id = db.Column(db.Integer, db.ForeignKey("doctor.id"), nullable=False)
-    patient_id = db.Column(db.Integer, db.ForeignKey("patient.id"), nullable=False)
-
-    doctor = db.relationship("Doctor", back_populates="sessions")
-    patient = db.relationship("Patient", back_populates="sessions")
-    movements = db.relationship("Movement", back_populates="session")
-
-
-class Movement(db.Model):
-    __tablename__ = 'movement'
-    id = db.Column(db.Integer, primary_key=True)
-    data = db.Column(db.JSON, nullable=False)
-
-    session_id = db.Column(db.Integer, db.ForeignKey("session.id"), nullable=False)
-
-    session = db.relationship("Session", back_populates="movements")
 
 @app.route('/')
 def index():
-    return 'Hello World!'
-
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    print(data)
-    email = data.get('email')
-    password = data.get('password')
-
-    if not email or not password:
-        return jsonify({"msg": "Email and password are required"}), 400
-
-    user = User.query.filter_by(email=email).first()
-
-    if user is None or not user.check_password(password):
-        return jsonify({"msg": "Bad email or password"}), 401
-
-    access_token = create_access_token(identity=str(user.id))
-    return jsonify(access_token=access_token)
-
-@app.route('/users/<int:user_id>', methods=['GET'])
-@jwt_required()
-def get_user_data(user_id):
-    current_user_id = get_jwt_identity()
-
-    if current_user_id != user_id:
-        return jsonify({"msg": "Forbidden: You can only access your own data"}), 403
-
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"msg": "User not found"}), 404
-
-    return jsonify({
-        "id": user.id,
-        "name": user.name,
-        "email": user.email,
-        "cpf": user.cpf,
-        "birthDate": user.birthDate,
-        "gender": user.gender,
-        "type": user.type,
-        "status": user.status
-    }), 200
-
-@app.route('/sessions', methods=['POST'])
-@jwt_required()
-def create_session_and_receive_data():
-    current_user_id = int(get_jwt_identity())
-    data = request.get_json()
+    return jsonify({"msg": "Middleware ativo. Use POST /ingest para enviar dados."})
 
 
-    if not data:
-        return jsonify({"msg": "No data provided"}), 400
+def _parse_timestamp(value: str) -> datetime.datetime:
+    # Accept ISO8601 with optional 'Z' suffix
+    if isinstance(value, str):
+        v = value.replace('Z', '+00:00')
+        try:
+            return datetime.datetime.fromisoformat(v)
+        except ValueError:
+            pass
+    raise ValueError('timestamp inválido, use ISO 8601 (ex.: 2025-10-20T14:30:00Z)')
 
-    doctor_id = data.get("doctor_id")
-    patient_id = data.get("patient_id")
-    movements_data = data.get("movements")
-    vital_signs_avg = data.get("vital_signs_avg")
 
-    if not doctor_id or not patient_id or not movements_data:
-        return jsonify({"msg": "doctor_id, patient_id and movements are required"}), 400
+def _ensure_neighborhood(name: str) -> Neighborhood:
+    nb = Neighborhood.query.filter_by(name=name).first()
+    if nb:
+        return nb
+    nb = Neighborhood(name=name)
+    db.session.add(nb)
+    db.session.flush()  # get id without full commit
+    return nb
 
-    doctor = Doctor.query.get(doctor_id)
-    patient = Patient.query.get(patient_id)
-    if not doctor or not patient:
-        return jsonify({"msg": "Doctor or patient not found"}), 404
 
-    print(current_user_id, patient.user_id)
-    if patient.user_id != current_user_id:
-        return jsonify({"msg": "Forbidden: You cannot create a session for others"}), 403
+@app.route('/ingest', methods=['POST'])
+def ingest():
+    payload: Dict[str, Any] = request.get_json(silent=True) or {}
+    if 'bairros' not in payload or not isinstance(payload['bairros'], dict):
+        return jsonify({"msg": "Corpo inválido: esperado objeto com chave 'bairros'"}), 400
 
-    session = Session(
-        date=datetime.date.today(),
-        doctor_id=doctor_id,
-        patient_id=patient_id,
-        vital_signs_avg=vital_signs_avg
-    )
-    db.session.add(session)
+    bairros = payload['bairros']
+
+    created_neighborhoods = 0
+    upserted_measurements = 0
+    errors: List[Dict[str, Any]] = []
+
+    for nome_bairro, lista_registros in bairros.items():
+        if not isinstance(lista_registros, list):
+            errors.append({"bairro": nome_bairro, "erro": "Valor deve ser uma lista"})
+            continue
+
+        # ensure/create neighborhood lazily; detect creation by checking transient state
+        existing = Neighborhood.query.filter_by(name=nome_bairro).first()
+        if existing is None:
+            nb = _ensure_neighborhood(nome_bairro)
+            created_neighborhoods += 1
+        else:
+            nb = existing
+
+        for idx, registro in enumerate(lista_registros):
+            if not isinstance(registro, dict):
+                errors.append({"bairro": nome_bairro, "index": idx, "erro": "Registro deve ser um objeto"})
+                continue
+            try:
+                ts = _parse_timestamp(registro.get('timestamp'))
+            except Exception as e:
+                errors.append({"bairro": nome_bairro, "index": idx, "erro": str(e)})
+                continue
+
+            clima = registro.get('clima')
+            qualidade_do_ar = registro.get('qualidade_do_ar')
+            qualidade_da_agua = registro.get('qualidade_da_agua')
+
+            # Upsert by (neighborhood_id, timestamp)
+            existing_m = Measurement.query.filter_by(neighborhood_id=nb.id, timestamp=ts).first()
+            if existing_m:
+                existing_m.clima = clima
+                existing_m.qualidade_do_ar = qualidade_do_ar
+                existing_m.qualidade_da_agua = qualidade_da_agua
+            else:
+                m = Measurement(
+                    neighborhood_id=nb.id,
+                    timestamp=ts,
+                    clima=clima,
+                    qualidade_do_ar=qualidade_do_ar,
+                    qualidade_da_agua=qualidade_da_agua,
+                )
+                db.session.add(m)
+            upserted_measurements += 1
+
     db.session.commit()
 
-    movement = Movement(session_id=session.id, data=movements_data)
-    db.session.add(movement)
-    db.session.commit()
-
-    try:
-        payload = {
-            "session_id": session.id,
-            "date": str(session.date),
-            "doctor_id": doctor_id,
-            "patient_id": patient_id,
-            "vital_signs_avg": vital_signs_avg,
-            "movements": movements_data
-        }
-        print(f"Enviando para a nuvem: {payload}")
-        # Para envio real, use:
-        # cloud_url = "https://example-cloud.com/api/sessions"
-        # response = requests.post(cloud_url, json=payload)
-        # print("Cloud response:", response.status_code, response.text)
-    except Exception as e:
-        print(f"Erro ao enviar para a nuvem: {e}")
-
     return jsonify({
-        "msg": "Session created, movement saved and sent to cloud",
-        "session_id": session.id,
-        "movement_id": movement.id
+        "msg": "Dados ingeridos",
+        "bairros_criados": created_neighborhoods,
+        "medicoes_processadas": upserted_measurements,
+        "erros": errors,
     }), 201
-    
+
+
+def _parse_day_to_dt(day: str) -> datetime.datetime:
+    """Converte 'YYYY-MM-DD' para datetime em UTC (00:00)."""
+    try:
+        d = datetime.date.fromisoformat(day)
+        return datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc)
+    except Exception:
+        raise ValueError("dia inválido, use formato YYYY-MM-DD")
+
+
+@app.route('/ingest_v2', methods=['POST'])
+def ingest_v2():
+    """
+    Aceita o novo formato diário:
+    {
+      "bairros": {
+        "Nome do Bairro": {
+          "YYYY-MM-DD": {
+            "clima": {...},
+            "qualidade_do_ar": {...},
+            "qualidade_da_agua": {...},
+            "riscos": { "clima": [], "qualidade_do_ar": [], "qualidade_da_agua": [] }
+          }
+        }
+      }
+    }
+    """
+    payload: Dict[str, Any] = request.get_json(silent=True) or {}
+    if 'bairros' not in payload or not isinstance(payload['bairros'], dict):
+        return jsonify({"msg": "Corpo inválido: esperado objeto com chave 'bairros'"}), 400
+
+    bairros = payload['bairros']
+
+    created_neighborhoods = 0
+    upserted_measurements = 0
+    errors: List[Dict[str, Any]] = []
+
+    for nome_bairro, dias_obj in bairros.items():
+        if not isinstance(dias_obj, dict):
+            errors.append({"bairro": nome_bairro, "erro": "Valor deve ser um objeto de dias"})
+            continue
+
+        existing = Neighborhood.query.filter_by(name=nome_bairro).first()
+        if existing is None:
+            nb = _ensure_neighborhood(nome_bairro)
+            created_neighborhoods += 1
+        else:
+            nb = existing
+
+        for dia, dados in dias_obj.items():
+            if not isinstance(dados, dict):
+                errors.append({"bairro": nome_bairro, "dia": dia, "erro": "Dados do dia devem ser um objeto"})
+                continue
+            try:
+                ts = _parse_day_to_dt(dia)
+            except ValueError as e:
+                errors.append({"bairro": nome_bairro, "dia": dia, "erro": str(e)})
+                continue
+
+            clima = dados.get('clima')
+            qualidade_do_ar = dados.get('qualidade_do_ar')
+            qualidade_da_agua = dados.get('qualidade_da_agua')
+            riscos = dados.get('riscos')
+
+            existing_m = Measurement.query.filter_by(neighborhood_id=nb.id, timestamp=ts).first()
+            if existing_m:
+                existing_m.clima = clima
+                existing_m.qualidade_do_ar = qualidade_do_ar
+                existing_m.qualidade_da_agua = qualidade_da_agua
+                existing_m.riscos = riscos
+            else:
+                m = Measurement(
+                    neighborhood_id=nb.id,
+                    timestamp=ts,
+                    clima=clima,
+                    qualidade_do_ar=qualidade_do_ar,
+                    qualidade_da_agua=qualidade_da_agua,
+                    riscos=riscos,
+                )
+                db.session.add(m)
+            upserted_measurements += 1
+
+    db.session.commit()
+
+    return jsonify({
+        "msg": "Dados ingeridos (v2)",
+        "bairros_criados": created_neighborhoods,
+        "medicoes_processadas": upserted_measurements,
+        "erros": errors,
+    }), 201
+
+
+@app.route('/bairros', methods=['GET'])
+def list_bairros():
+    items = Neighborhood.query.order_by(Neighborhood.name.asc()).all()
+    return jsonify([{"id": n.id, "name": n.name} for n in items])
+
+
+@app.route('/bairros/<string:nome>/medicoes', methods=['GET'])
+def list_medicoes(nome: str):
+    nb = Neighborhood.query.filter_by(name=nome).first()
+    if not nb:
+        return jsonify({"msg": "Bairro não encontrado"}), 404
+
+    start = request.args.get('start')
+    end = request.args.get('end')
+    q = Measurement.query.filter_by(neighborhood_id=nb.id).order_by(Measurement.timestamp.asc())
+    try:
+        if start:
+            q = q.filter(Measurement.timestamp >= _parse_timestamp(start))
+        if end:
+            q = q.filter(Measurement.timestamp <= _parse_timestamp(end))
+    except ValueError as e:
+        return jsonify({"msg": str(e)}), 400
+
+    data = [
+        {
+            "timestamp": m.timestamp.replace(tzinfo=datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+            "clima": m.clima,
+            "qualidade_do_ar": m.qualidade_do_ar,
+            "qualidade_da_agua": m.qualidade_da_agua,
+        }
+        for m in q.all()
+    ]
+    return jsonify({"bairro": nb.name, "registros": data})
+
+
+@app.route('/riscos', methods=['GET'])
+def riscos():
+    """
+    Retorna os dados no formato novo, agrupados por dia, para todos os bairros.
+    Exatamente a estrutura:
+    {
+      "bairros": { "Nome": { "YYYY-MM-DD": { ... } } }
+    }
+    """
+    result: Dict[str, Any] = {"bairros": {}}
+
+    bairros = Neighborhood.query.all()
+    for nb in bairros:
+        dias: Dict[str, Any] = {}
+        regs: List[Measurement] = (
+            Measurement.query
+            .filter_by(neighborhood_id=nb.id)
+            .order_by(Measurement.timestamp.asc())
+            .all()
+        )
+        for m in regs:
+            # normaliza para data (UTC)
+            ts = m.timestamp
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
+            dia_str = ts.date().isoformat()
+            dias[dia_str] = {
+                "clima": m.clima,
+                "qualidade_do_ar": m.qualidade_do_ar,
+                "qualidade_da_agua": m.qualidade_da_agua,
+                "riscos": m.riscos or {"clima": [], "qualidade_do_ar": [], "qualidade_da_agua": []},
+            }
+        result["bairros"][nb.name] = dias
+
+    return jsonify(result)
+
+
 if __name__ == '__main__':
     app.run(debug=True)

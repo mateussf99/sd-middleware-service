@@ -11,8 +11,8 @@ def run_migration_commands():
     print("Iniciando o processo de migração e semeadura do banco de dados...")
 
     try:
-        # 1. Limpa as pastas de 'instance' e 'migrations'
-        print("Executando a limpeza das pastas...")
+        # 1. Limpeza: remove 'instance', 'migrations' e o arquivo de banco 'app.db' (se existirem)
+        print("Executando a limpeza das pastas e do arquivo de banco...")
         folders_to_clean = ['instance', 'migrations']
         for folder in folders_to_clean:
             if os.path.exists(folder) and os.path.isdir(folder):
@@ -20,6 +20,14 @@ def run_migration_commands():
                 shutil.rmtree(folder)
             else:
                 print(f"Pasta '{folder}' não encontrada, pulando a exclusão.")
+
+        db_file = 'app.db'
+        if os.path.exists(db_file) and os.path.isfile(db_file):
+            print(f"Excluindo o arquivo de banco: {db_file}")
+            os.remove(db_file)
+        else:
+            print(f"Arquivo '{db_file}' não encontrado, pulando a exclusão.")
+
         print("Limpeza concluída.")
         print("---")
 
@@ -60,25 +68,8 @@ def run_migration_commands():
         print(result.stdout)
         print("---")
 
-        # 5. Executa o script de semeadura (seeding)
-        print("Executando: python3 seed.py")
-
-        if os.name == 'nt':  # Se o sistema operacional for Windows
-            seedCommand = ['py', 'seed.py']
-        else:  # Se for 'posix' (Linux, macOS, etc.)
-            seedCommand = ['python3', 'seed.py']
-
-        result = subprocess.run(
-            seedCommand,
-            check=True,
-            text=True,
-            capture_output=True
-        )
-        print("Saída do comando 'seed.py':")
-        print(result.stdout)
-        print("---")
-
-        print("Processo de migração e semeadura concluído com sucesso!")
+        # 5. (Sem seeding) — apenas confirma finalização
+        print("Processo de migração concluído com sucesso (sem seeding).")
 
     except subprocess.CalledProcessError as e:
         print(f"Erro durante a execução do comando: {e.cmd}")
